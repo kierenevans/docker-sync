@@ -20,11 +20,13 @@ module DockerSync
         @options = options
         @sync_name = sync_name
         # if a custom image is set, apply it
-        if @options.key?('image')
-          @docker_image = @options['image']
+        if @options.key?('unison_image')
+          @docker_image = @options['unison_image']
         else
           @docker_image = 'eugenmayer/unison:hostsync_0.2'
         end
+        @initial_sync_image = @docker_image
+        @initial_sync_image = @options['unison_initial_sync_image'] if @options.key?('unison_initial_sync_image')
 
         # TODO: remove this when we have a more stable image, but for now, we need this
         uc = UpdateChecker.new
@@ -77,6 +79,8 @@ module DockerSync
 
         host_disk_mount_mode = '' # see https://github.com/moby/moby/pull/31047
         host_disk_mount_mode = ":#{@options['host_disk_mount_mode']}" if @options.key?('host_disk_mount_mode')
+        initial_sync_host_disk_mount_mode = host_disk_mount_mode
+        initial_sync_host_disk_mount_mode =  ":#{@options['initial_sync_host_disk_mount_mode']}" if @options.key?('initial_sync_host_disk_mount_mode')
 
         additional_docker_env = env.map{ |key,value| "-e #{key}=\"#{value}\"" }.join(' ')
         running = `docker ps --filter 'status=running' --filter 'name=#{container_name}' --format "{{.Names}}" | grep '^#{container_name}$'`
@@ -89,7 +93,7 @@ module DockerSync
             run_privileged = '--privileged' if @options.key?('max_inotify_watches') #TODO: replace by the minimum capabilities required
             say_status 'ok', 'Starting precopy', :white if @options['verbose']
             # we just run the precopy script and remove the container
-            cmd = "docker run --rm -v \"#{volume_app_sync_name}:/app_sync\" -v \"#{host_sync_src}:/host_sync#{host_disk_mount_mode}\" -e HOST_VOLUME=/host_sync -e APP_VOLUME=/app_sync -e TZ=${TZ-`readlink /etc/localtime | sed -e 's,/usr/share/zoneinfo/,,'`} #{additional_docker_env} #{run_privileged} --name #{container_name} #{@docker_image} /usr/local/bin/precopy_appsync"
+            cmd = "docker run --rm -v \"#{volume_app_sync_name}:/app_sync\" -v \"#{host_sync_src}:/host_sync#{initial_sync_host_disk_mount_mode}\" -e HOST_VOLUME=/host_sync -e APP_VOLUME=/app_sync -e TZ=${TZ-`readlink /etc/localtime | sed -e 's,/usr/share/zoneinfo/,,'`} #{additional_docker_env} #{run_privileged} --name #{container_name} #{@initial_sync_image} /usr/local/bin/precopy_appsync"
             say_status 'precopy', cmd, :white if @options['verbose']
             system(cmd) || raise('Precopy failed')
             say_status 'ok', 'Starting container', :white if @options['verbose']
